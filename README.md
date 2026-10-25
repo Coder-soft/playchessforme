@@ -62,6 +62,18 @@ open -a "Zen Browser"
 The script swaps the xpi at the same internal-id path, so Firefox re-syncs it
 on launch (update flow = rebuild + rerun script).
 
+## Install into Helium (ungoogled-chromium fork)
+
+Helium honors `--load-extension` and *persists* those installs. First install
+must be one cold boot with the switch loaded:
+
+```bash
+sh scripts/install-helium.sh   # requires Helium to be closed
+```
+
+Then just open a chess.com game page as usual. Updates: `npm run build:chrome`
+and restart Helium — the unpacked directory is re-read at launch.
+
 ## Design
 
 Four modules, three seams (see `lib/`):
