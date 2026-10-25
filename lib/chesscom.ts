@@ -34,25 +34,49 @@ export interface GameAdapter {
   playMove(uci: string): Promise<void>;
 }
 
-/** Picks an adapter: page-scope bridge if it comes up in time, DOM otherwise. */
+/**
+ * One bridge adapter per document, no matter how many times the wiring loop
+ * retries — each instance adds a window 'message' listener and re-injecting
+ * the page script would stack duplicate pollers.
+ */
+const BRIDGE_WAIT_MS = 3500;
+let bridgeSingleton: (GameAdapter & { waitReady(ms: number): Promise<boolean>; alive(): boolean }) | null = null;
+
+function getBridge(): GameAdapter & { waitReady(ms: number): Promise<boolean>; alive(): boolean } {
+  bridgeSingleton ??= createBridgeAdapter();
+  return bridgeSingleton;
+}
+
+async function waitForBridge(): Promise<GameAdapter | null> {
+  const adapter = getBridge();
+  const ready = await adapter.waitReady(BRIDGE_WAIT_MS);
+  return ready ? adapter : null;
+}
+
+/**
+ * Selection, in order:
+ *   1. bridge ready (a readable game is flowing)  → play-capable
+ *   2. bridge alive but gameless — chess.com still spawns the real controller
+ *      later (SPA Quick Pairing, slow loads). Null so the wiring loop keeps
+ *      polling; a board-without-game must not wire the watch-only fallback
+ *      and lock the document out of play capability for its whole life.
+ *   3. bridge never ran (CSP-blocked / page-bridge broken) + a board exists
+ *      → watch-only DOM fallback, visible in the pill.
+ *   4. no board at all → null; not a game page, don't litter the DOM.
+ */
 export async function openGame(): Promise<GameAdapter | null> {
-  const bridge = await waitForBridge(4000);
+  const bridge = await waitForBridge();
   if (bridge) {
     console.info('[pcfm] page-scope bridge is up');
     return bridge;
   }
+  if (getBridge().alive()) return null; // bridge healthy; game not here yet
   const dom = await openDomAdapter();
   if (dom) {
     console.warn('[pcfm] bridge unavailable — DOM fallback active (watch-only)');
     return dom;
   }
   return null;
-}
-
-async function waitForBridge(timeoutMs: number): Promise<GameAdapter | null> {
-  const adapter = createBridgeAdapter();
-  const ready = await adapter.waitReady(timeoutMs);
-  return ready ? adapter : null;
 }
 
 async function openDomAdapter(): Promise<GameAdapter | null> {
@@ -67,14 +91,16 @@ const PAGE_SOURCE = 'pcfm-page';
 const CONTENT_SOURCE = 'pcfm-content';
 const MOVE_TIMEOUT_MS = 10_000;
 
-export function createBridgeAdapter(): GameAdapter & { waitReady(ms: number): Promise<boolean> } {
+export function createBridgeAdapter(): GameAdapter & { waitReady(ms: number): Promise<boolean>; alive(): boolean } {
   let ready = false;
+  let isAlive = false;
   let latestState: GameState | null = null;
   const watchers = new Set<(s: GameState) => void>();
   const pendingMoves = new Map<string, { resolve: () => void; reject: (e: Error) => void }>();
   let reqSeq = 0;
 
   function injectPageScript(): void {
+    if (document.querySelector('script[src$="page-bridge.js"]')) return; // SPA: it's already out there
     const el = document.createElement('script');
     el.src = browser.runtime.getURL('/page-bridge.js');
     document.documentElement.prepend(el);
@@ -85,6 +111,10 @@ export function createBridgeAdapter(): GameAdapter & { waitReady(ms: number): Pr
     if (event.source !== window || typeof data !== 'object' || data === null) return;
     if (data.source !== PAGE_SOURCE || data.target !== CONTENT_SOURCE) return;
 
+    if (data.type === 'birth') {
+      alive = true;
+      return;
+    }
     if (data.type === 'ready') {
       ready = true;
       return;
@@ -127,6 +157,7 @@ export function createBridgeAdapter(): GameAdapter & { waitReady(ms: number): Pr
         }, 120);
       });
     },
+    alive: () => isAlive,
     watch(cb) {
       watchers.add(cb);
       if (latestState) cb(latestState);

@@ -15,13 +15,30 @@ export default defineContentScript({
   matches: ['*://www.chess.com/*'],
   runAt: 'document_idle',
   main() {
-    void wire();
+    void watchAndWire();
   },
 });
 
-async function wire(): Promise<void> {
-  const adapter = await openGame();
-  if (!adapter) return; // not a live-game page; don't litter the DOM
+/**
+ * chess.com is an SPA: a live game can appear minutes after load (Quick
+ * Pairing from home) or the whole page may load slowly, so a one-shot
+ * openGame() misses far too easily. Retry on an interval until an adapter is
+ * up and the pill exists — once wired, stop; the SPA watchdog's job is done.
+ */
+const WIRE_RETRY_MS = 2500;
+
+async function watchAndWire(): Promise<void> {
+  for (;;) {
+    const adapter = await openGame();
+    if (adapter) {
+      await wire(adapter);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, WIRE_RETRY_MS));
+  }
+}
+
+async function wire(adapter: GameAdapter): Promise<void> {
 
   const pinnedStored = await storage.getItem<string | null>('local:pcfm.color');
   const skillStored = await storage.getItem<number | null>('local:pcfm.skill');

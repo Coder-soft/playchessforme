@@ -192,6 +192,18 @@ function applyMove(uci: string): { ok: boolean; error?: string } {
 }
 
 export default defineUnlistedScript(() => {
+  // Re-injection guard: on SPA documents the content script may prepend this
+  // tag more than once; only the first execution may register anything.
+  const w = window as Window & { __pcfmPageBridge?: boolean };
+  if (w.__pcfmPageBridge) return;
+  w.__pcfmPageBridge = true;
+
+  // Birth ping: proves the script actually executes (a <script> tag that a
+  // page CSP blocked still sits dead in the DOM). The content side tunes the
+  // DOM fallback on this: bridge alive → wait for it; bridge never ran →
+  // watch-only fallback is the only honest option.
+  window.postMessage({ source: PAGE_SOURCE, target: CONTENT_SOURCE, type: 'birth' }, '*');
+
   window.addEventListener('message', (event) => {
     const data = event.data as UnknownRecord | null;
     if (event.source !== window || typeof data !== 'object' || data === null) return;
