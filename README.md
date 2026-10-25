@@ -40,11 +40,27 @@ npm run build:firefox    # dist/firefox-mv3
 npm run zip              # store zips for both
 ```
 
-Load unpacked:
+## Install (Chrome + Firefox)
 
 - **Chrome**: chrome://extensions → Developer mode → Load unpacked → `dist/chrome-mv3`
 - **Firefox**: about:debugging#/runtime/this-firefox → Load Temporary Add-on →
-  pick `manifest.json` inside `dist/firefox-mv3`
+  pick `manifest.json` inside `dist/firefox-mv3` *(resets on restart)*
+- **Firefox, permanent (signed builds only)**: install
+  `.output/playchessforme-0.1.0-firefox.zip` via about:addons.
+
+## Install into Zen Browser (used by this project's author)
+
+Zen honors `xpinstall.signatures.required=false`, so the unsigned Firefox build
+installs permanently:
+
+```bash
+npm run build:firefox
+sh scripts/install-zen.sh   # quit Zen first; the script exits loudly if it runs
+open -a "Zen Browser"
+```
+
+The script swaps the xpi at the same internal-id path, so Firefox re-syncs it
+on launch (update flow = rebuild + rerun script).
 
 ## Design
 
